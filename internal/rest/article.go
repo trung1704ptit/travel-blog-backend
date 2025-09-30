@@ -22,10 +22,10 @@ type ResponseError struct {
 //
 //go:generate mockery --name ArticleService
 type ArticleService interface {
-	Fetch(ctx context.Context, cursor string, num int64) ([]domain.Article, string, error)
-	GetByID(ctx context.Context, id uuid.UUID) (domain.Article, error)
+	Fetch(ctx context.Context, cursor string, num int64) ([]domain.ArticleResponse, string, error)
+	GetByID(ctx context.Context, id uuid.UUID) (domain.ArticleResponse, error)
 	Update(ctx context.Context, ar *domain.Article) error
-	GetBySlug(ctx context.Context, slug string) (domain.Article, error)
+	GetBySlug(ctx context.Context, slug string) (domain.ArticleResponse, error)
 	Store(context.Context, *domain.Article) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -44,8 +44,8 @@ func NewArticleHandler(e *echo.Echo, svc ArticleService) {
 	}
 	e.GET("/articles", handler.FetchArticle)
 	e.POST("/articles", handler.Store)
-	e.GET("/articles/:id", handler.GetByID)
-	e.DELETE("/articles/:id", handler.Delete)
+	e.GET("/articles/:slug", handler.GetBySlug)
+	e.DELETE("/articles/:slug", handler.Delete)
 }
 
 // FetchArticle will fetch the article based on given params
@@ -80,6 +80,24 @@ func (a *ArticleHandler) GetByID(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	art, err := a.Service.GetByID(ctx, id)
+	if err != nil {
+		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, art)
+}
+
+// GetByID will get article by given id
+func (a *ArticleHandler) GetBySlug(c echo.Context) error {
+	slug := c.Param("slug")
+
+	if slug == "" {
+		return c.JSON(http.StatusBadRequest, ResponseError{Message: "Slug is required"})
+	}
+
+	ctx := c.Request().Context()
+
+	art, err := a.Service.GetBySlug(ctx, slug)
 	if err != nil {
 		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
 	}

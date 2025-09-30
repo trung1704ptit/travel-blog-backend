@@ -107,31 +107,34 @@ image-build:
 		--tag go-clean-arch \
 			.
 
-# Commenting this as this not relevant for the project, we load the DB data from the SQL file.
-# please refer this when introducing the database schema migrations.
+# ~~~ Database Migrations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# # ~~~ Database Migrations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- 
+MYSQL_DSN := "mysql://$(MYSQL_USER):$(MYSQL_PASSWORD)@tcp($(MYSQL_ADDRESS))/$(MYSQL_DATABASE)"
 
-# MYSQL_DSN := "mysql://$(MYSQL_USER):$(MYSQL_PASSWORD)@tcp($(MYSQL_ADDRESS))/$(MYSQL_DATABASE)"
+migrate: ## Clean and recreate database with new schema
+	@echo "Running database migration..."
+	@mysql -h $(shell echo $(MYSQL_ADDRESS) | cut -d: -f1) -P $(shell echo $(MYSQL_ADDRESS) | cut -d: -f2) -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) < migrate.sql
+	@echo "Database migration completed successfully!"
 
-# migrate-up: $(MIGRATE) ## Apply all (or N up) migrations.
-# 	@ read -p "How many migration you wants to perform (default value: [all]): " N; \
-# 	migrate  -database $(MYSQL_DSN) -path=misc/migrations up ${NN}
+migrate-docker: ## Run migration using Docker MySQL client
+	@echo "Running database migration via Docker..."
+	@docker exec -i $$(docker-compose ps -q mysql) mysql -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) < migrate.sql
+	@echo "Database migration completed successfully!"
 
-# .PHONY: migrate-down
-# migrate-down: $(MIGRATE) ## Apply all (or N down) migrations.
-# 	@ read -p "How many migration you wants to perform (default value: [all]): " N; \
-# 	migrate  -database $(MYSQL_DSN) -path=misc/migrations down ${NN}
+migrate-local: ## Run migration using local MySQL client (requires MySQL client installed)
+	@echo "Running database migration locally..."
+	@mysql -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) < migrate.sql
+	@echo "Database migration completed successfully!"
 
-# .PHONY: migrate-drop
-# migrate-drop: $(MIGRATE) ## Drop everything inside the database.
-# 	migrate  -database $(MYSQL_DSN) -path=misc/migrations drop
+migrate-nested: ## Add nested category support to existing database
+	@echo "Running nested categories migration..."
+	@mysql -h $(shell echo $(MYSQL_ADDRESS) | cut -d: -f1) -P $(shell echo $(MYSQL_ADDRESS) | cut -d: -f2) -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) < migrate_nested_categories.sql
+	@echo "Nested categories migration completed successfully!"
 
-# .PHONY: migrate-create
-# migrate-create: $(MIGRATE) ## Create a set of up/down migrations with a specified name.
-# 	@ read -p "Please provide name for the migration: " Name; \
-# 	migrate create -ext sql -dir misc/migrations $${Name}
+migrate-nested-docker: ## Run nested categories migration using Docker MySQL client
+	@echo "Running nested categories migration via Docker..."
+	@docker exec -i $$(docker-compose ps -q mysql) mysql -u $(MYSQL_USER) -p$(MYSQL_PASSWORD) < migrate_nested_categories.sql
+	@echo "Nested categories migration completed successfully!"
 
 # ~~~ Cleans ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

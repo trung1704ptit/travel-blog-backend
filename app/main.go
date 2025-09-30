@@ -15,6 +15,7 @@ import (
 	mysqlRepo "github.com/bxcodec/go-clean-arch/internal/repository/mysql"
 
 	"github.com/bxcodec/go-clean-arch/article"
+	"github.com/bxcodec/go-clean-arch/category"
 	"github.com/bxcodec/go-clean-arch/internal/rest"
 	"github.com/bxcodec/go-clean-arch/internal/rest/middleware"
 	"github.com/joho/godotenv"
@@ -75,10 +76,15 @@ func main() {
 	// Prepare Repository
 	authorRepo := mysqlRepo.NewAuthorRepository(dbConn)
 	articleRepo := mysqlRepo.NewArticleRepository(dbConn)
+	categoryRepo := mysqlRepo.NewCategoryRepository(dbConn)
 
 	// Build service Layer
-	svc := article.NewService(articleRepo, authorRepo)
-	rest.NewArticleHandler(e, svc)
+	articleSvc := article.NewService(articleRepo, authorRepo, categoryRepo)
+	categorySvc := category.NewService(categoryRepo)
+
+	// Register handlers
+	rest.NewArticleHandler(e, articleSvc)
+	rest.NewCategoryHandler(e, categorySvc)
 
 	// Start Server
 	address := os.Getenv("SERVER_ADDRESS")

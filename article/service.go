@@ -34,16 +34,25 @@ type AuthorRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (domain.Author, error)
 }
 
+// CategoryRepository represent the category's repository contract
+//
+//go:generate mockery --name CategoryRepository
+type CategoryRepository interface {
+	GetByArticleID(ctx context.Context, articleID uuid.UUID) ([]domain.Category, error)
+}
+
 type Service struct {
-	articleRepo ArticleRepository
-	authorRepo  AuthorRepository
+	articleRepo  ArticleRepository
+	authorRepo   AuthorRepository
+	categoryRepo CategoryRepository
 }
 
 // NewService will create a new article service object
-func NewService(a ArticleRepository, ar AuthorRepository) *Service {
+func NewService(a ArticleRepository, ar AuthorRepository, cr CategoryRepository) *Service {
 	return &Service{
-		articleRepo: a,
-		authorRepo:  ar,
+		articleRepo:  a,
+		authorRepo:   ar,
+		categoryRepo: cr,
 	}
 }
 
@@ -103,30 +112,54 @@ func (a *Service) fillAuthorDetails(ctx context.Context, data []domain.Article) 
 	return data, nil
 }
 
-func (a *Service) Fetch(ctx context.Context, cursor string, num int64) (res []domain.Article, nextCursor string, err error) {
-	res, nextCursor, err = a.articleRepo.Fetch(ctx, cursor, num)
+func (a *Service) Fetch(ctx context.Context, cursor string, num int64) (res []domain.ArticleResponse, nextCursor string, err error) {
+	articles, nextCursor, err := a.articleRepo.Fetch(ctx, cursor, num)
 	if err != nil {
 		return nil, "", err
 	}
 
-	res, err = a.fillAuthorDetails(ctx, res)
+	articles, err = a.fillAuthorDetails(ctx, articles)
+	if err != nil {
+		nextCursor = ""
+		return nil, "", err
+	}
+
+	// Fill categories and generate breadcrumbs
+	res, err = a.fillCategoriesAndBreadcrumb(ctx, articles)
 	if err != nil {
 		nextCursor = ""
 	}
 	return
 }
 
-func (a *Service) GetByID(ctx context.Context, id uuid.UUID) (res domain.Article, err error) {
-	res, err = a.articleRepo.GetByID(ctx, id)
+func (a *Service) GetByID(ctx context.Context, id uuid.UUID) (res domain.ArticleResponse, err error) {
+	article, err := a.articleRepo.GetByID(ctx, id)
 	if err != nil {
 		return
 	}
 
-	resAuthor, err := a.authorRepo.GetByID(ctx, res.Author.ID)
+	resAuthor, err := a.authorRepo.GetByID(ctx, article.Author.ID)
 	if err != nil {
-		return domain.Article{}, err
+		return domain.ArticleResponse{}, err
 	}
-	res.Author = resAuthor
+	article.Author = resAuthor
+
+	// Fetch categories
+	categories, err := a.categoryRepo.GetByArticleID(ctx, article.ID)
+	if err != nil {
+		return domain.ArticleResponse{}, err
+	}
+	article.Categories = categories
+
+	// Generate breadcrumb
+	breadcrumb := a.generateBreadcrumb(&article)
+
+	// Create response
+	res = domain.ArticleResponse{
+		Article:    article,
+		Breadcrumb: breadcrumb,
+	}
+
 	return
 }
 
@@ -135,18 +168,35 @@ func (a *Service) Update(ctx context.Context, ar *domain.Article) (err error) {
 	return a.articleRepo.Update(ctx, ar)
 }
 
-func (a *Service) GetBySlug(ctx context.Context, slug string) (res domain.Article, err error) {
-	res, err = a.articleRepo.GetBySlug(ctx, slug)
+func (a *Service) GetBySlug(ctx context.Context, slug string) (res domain.ArticleResponse, err error) {
+	article, err := a.articleRepo.GetBySlug(ctx, slug)
 	if err != nil {
 		return
 	}
 
-	resAuthor, err := a.authorRepo.GetByID(ctx, res.Author.ID)
+	resAuthor, err := a.authorRepo.GetByID(ctx, article.Author.ID)
 	if err != nil {
-		return domain.Article{}, err
+		return domain.ArticleResponse{}, err
 	}
 
-	res.Author = resAuthor
+	article.Author = resAuthor
+
+	// Fetch categories
+	categories, err := a.categoryRepo.GetByArticleID(ctx, article.ID)
+	if err != nil {
+		return domain.ArticleResponse{}, err
+	}
+	article.Categories = categories
+
+	// Generate breadcrumb
+	breadcrumb := a.generateBreadcrumb(&article)
+
+	// Create response
+	res = domain.ArticleResponse{
+		Article:    article,
+		Breadcrumb: breadcrumb,
+	}
+
 	return
 }
 
@@ -206,4 +256,63 @@ func (a *Service) ensureUniqueSlug(ctx context.Context, baseSlug string, exclude
 	}
 
 	return slug
+}
+
+// generateBreadcrumb creates breadcrumb navigation from article categories
+func (a *Service) generateBreadcrumb(article *domain.Article) []domain.BreadcrumbItem {
+	if len(article.Categories) == 0 {
+		// If no categories, create a simple breadcrumb with just the article
+		return []domain.BreadcrumbItem{
+			{Name: "Home", Link: "/"},
+			{Name: article.Title, Link: fmt.Sprintf("/articles/%s", article.Slug)},
+		}
+	}
+
+	// Create breadcrumb from categories
+	breadcrumb := []domain.BreadcrumbItem{
+		{Name: "Home", Link: "/"},
+	}
+
+	// Add category breadcrumbs
+	for _, category := range article.Categories {
+		breadcrumb = append(breadcrumb, domain.BreadcrumbItem{
+			Name: category.Name,
+			Link: fmt.Sprintf("/categories/%s", category.Slug),
+		})
+	}
+
+	// Add the article itself as the final breadcrumb
+	breadcrumb = append(breadcrumb, domain.BreadcrumbItem{
+		Name: article.Title,
+		Link: fmt.Sprintf("/articles/%s", article.Slug),
+	})
+
+	return breadcrumb
+}
+
+// fillCategoriesAndBreadcrumb loads categories and generates breadcrumbs for articles
+func (a *Service) fillCategoriesAndBreadcrumb(ctx context.Context, articles []domain.Article) ([]domain.ArticleResponse, error) {
+	responses := make([]domain.ArticleResponse, len(articles))
+
+	for i, article := range articles {
+		// Fetch categories for this article
+		categories, err := a.categoryRepo.GetByArticleID(ctx, article.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		// Set categories on the article
+		article.Categories = categories
+
+		// Generate breadcrumb
+		breadcrumb := a.generateBreadcrumb(&article)
+
+		// Create response with breadcrumb
+		responses[i] = domain.ArticleResponse{
+			Article:    article,
+			Breadcrumb: breadcrumb,
+		}
+	}
+
+	return responses, nil
 }

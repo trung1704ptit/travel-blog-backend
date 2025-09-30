@@ -1,6 +1,12 @@
-CREATE DATABASE  IF NOT EXISTS `article` /*!40100 DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci */;
+-- Migration script to clean and recreate database with updated schema
+-- Run this script to update your database structure
+
+-- Drop existing database and recreate
+DROP DATABASE IF EXISTS `article`;
+CREATE DATABASE IF NOT EXISTS `article` /*!40100 DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci */;
 USE `article`;
 
+-- Set SQL mode and timezone
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
@@ -37,10 +43,15 @@ CREATE TABLE `category` (
   `id` char(36) NOT NULL,
   `name` varchar(45) COLLATE utf8_unicode_ci NOT NULL,
   `slug` varchar(45) COLLATE utf8_unicode_ci NOT NULL,
+  `description` text COLLATE utf8_unicode_ci DEFAULT NULL,
+  `image` varchar(500) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `parent_id` char(36) DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
   `updated_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `slug` (`slug`)
+  UNIQUE KEY `slug` (`slug`),
+  KEY `parent_id` (`parent_id`),
+  CONSTRAINT `category_ibfk_1` FOREIGN KEY (`parent_id`) REFERENCES `category` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -57,8 +68,16 @@ CREATE TABLE `article` (
   `content` longtext COLLATE utf8_unicode_ci NOT NULL,
   `thumbnail` varchar(500) COLLATE utf8_unicode_ci DEFAULT NULL,
   `image` varchar(500) COLLATE utf8_unicode_ci DEFAULT NULL,
-  `description` text COLLATE utf8_unicode_ci DEFAULT NULL,
+  `short_description` text COLLATE utf8_unicode_ci DEFAULT NULL,
+  `meta_description` text COLLATE utf8_unicode_ci DEFAULT NULL,
   `keywords` json DEFAULT NULL,
+  `tags` json DEFAULT NULL,
+  `reading_time_minutes` int DEFAULT 0,
+  `views` int DEFAULT 0,
+  `likes` int DEFAULT 0,
+  `comments` int DEFAULT 0,
+  `published` boolean DEFAULT false,
+  `published_at` datetime DEFAULT NULL,
   `author_id` char(36) NOT NULL,
   `updated_at` datetime DEFAULT NULL,
   `created_at` datetime DEFAULT NULL,
@@ -89,41 +108,45 @@ CREATE TABLE `article_category` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `author`
+-- Insert sample data
 --
+
+-- Insert authors
 LOCK TABLES `author` WRITE;
 /*!40000 ALTER TABLE `author` DISABLE KEYS */;
-INSERT INTO `author` VALUES ('550e8400-e29b-41d4-a716-446655440000','Iman Tumorang','2017-05-18 13:50:19','2017-05-18 13:50:19');
+INSERT INTO `author` VALUES 
+('550e8400-e29b-41d4-a716-446655440000','Iman Tumorang','2017-05-18 13:50:19','2017-05-18 13:50:19');
 /*!40000 ALTER TABLE `author` ENABLE KEYS */;
 UNLOCK TABLES;
 
---
--- Dumping data for table `category`
---
+-- Insert categories with nested structure
 LOCK TABLES `category` WRITE;
 /*!40000 ALTER TABLE `category` DISABLE KEYS */;
 INSERT INTO `category` VALUES 
-('550e8400-e29b-41d4-a716-446655440001','Makanan','food','2017-05-18 13:50:19','2017-05-18 13:50:19'),
-('550e8400-e29b-41d4-a716-446655440002','Kehidupan','life','2017-05-18 13:50:19','2017-05-18 13:50:19'),
-('550e8400-e29b-41d4-a716-446655440003','Kasih Sayang','love','2017-05-18 13:50:19','2017-05-18 13:50:19');
+-- Root categories
+('550e8400-e29b-41d4-a716-446655440001','Makanan','food','Kategori untuk semua hal tentang makanan','https://example.com/images/food-category.jpg',NULL,'2017-05-18 13:50:19','2017-05-18 13:50:19'),
+('550e8400-e29b-41d4-a716-446655440002','Kehidupan','life','Kategori untuk semua hal tentang kehidupan','https://example.com/images/life-category.jpg',NULL,'2017-05-18 13:50:19','2017-05-18 13:50:19'),
+('550e8400-e29b-41d4-a716-446655440003','Kasih Sayang','love','Kategori untuk semua hal tentang kasih sayang','https://example.com/images/love-category.jpg',NULL,'2017-05-18 13:50:19','2017-05-18 13:50:19'),
+-- Sub-categories of Makanan
+('550e8400-e29b-41d4-a716-446655440004','Masakan Indonesia','indonesian-food','Masakan tradisional Indonesia','https://example.com/images/indonesian-food.jpg','550e8400-e29b-41d4-a716-446655440001','2017-05-18 13:50:19','2017-05-18 13:50:19'),
+('550e8400-e29b-41d4-a716-446655440005','Masakan Barat','western-food','Masakan dari negara-negara barat','https://example.com/images/western-food.jpg','550e8400-e29b-41d4-a716-446655440001','2017-05-18 13:50:19','2017-05-18 13:50:19'),
+-- Sub-categories of Masakan Indonesia
+('550e8400-e29b-41d4-a716-446655440006','Nasi Goreng','nasi-goreng','Berbagai jenis nasi goreng','https://example.com/images/nasi-goreng.jpg','550e8400-e29b-41d4-a716-446655440004','2017-05-18 13:50:19','2017-05-18 13:50:19'),
+('550e8400-e29b-41d4-a716-446655440007','Soto','soto','Berbagai jenis soto','https://example.com/images/soto.jpg','550e8400-e29b-41d4-a716-446655440004','2017-05-18 13:50:19','2017-05-18 13:50:19');
 /*!40000 ALTER TABLE `category` ENABLE KEYS */;
 UNLOCK TABLES;
 
---
--- Dumping data for table `article`
---
+-- Insert articles
 LOCK TABLES `article` WRITE;
 /*!40000 ALTER TABLE `article` DISABLE KEYS */;
 INSERT INTO `article` VALUES 
-('550e8400-e29b-41d4-a716-446655440010','Makan Ayam','makan-ayam','<p>But I must explain to you how all this mistaken idea of denouncing pleasure and praising pain was born and I will give you a complete account of the system...</p>','https://example.com/thumb1.jpg','https://example.com/img1.jpg','A delicious article about eating chicken','["food", "chicken", "recipe"]','550e8400-e29b-41d4-a716-446655440000','2017-05-18 13:50:19','2017-05-18 13:50:19'),
-('550e8400-e29b-41d4-a716-446655440011','Makan Ikan','makan-ikan','<h1>Odio Mollis Turpis Dictumst</h1><p>Ut arcu tempor auctor pellentesque vitae lacinia potenti amet tellus sagittis molestie aliquam est mi facilisi amet...</p>','https://example.com/thumb2.jpg','https://example.com/img2.jpg','An article about eating fish','["food", "fish", "seafood"]','550e8400-e29b-41d4-a716-446655440000','2017-05-18 13:50:19','2017-05-18 13:50:19'),
-('550e8400-e29b-41d4-a716-446655440012','Makan Sayur','makan-sayur','Lorem ipsum dolor sit amet, consectetur adipiscing elit. Morbi id odio tortor. Pellentesque in efficitur velit...','https://example.com/thumb3.jpg','https://example.com/img3.jpg','A healthy article about eating vegetables','["food", "vegetables", "healthy"]','550e8400-e29b-41d4-a716-446655440000','2017-05-18 13:50:19','2017-05-18 13:50:19');
+('550e8400-e29b-41d4-a716-446655440010','Makan Ayam','makan-ayam','<p>But I must explain to you how all this mistaken idea of denouncing pleasure and praising pain was born and I will give you a complete account of the system...</p>','https://example.com/thumb1.jpg','https://example.com/img1.jpg','A delicious article about eating chicken','Meta description for chicken article','["food", "chicken", "recipe"]','["cooking", "healthy"]',5,100,25,10,true,'2017-05-18 13:50:19','550e8400-e29b-41d4-a716-446655440000','2017-05-18 13:50:19','2017-05-18 13:50:19'),
+('550e8400-e29b-41d4-a716-446655440011','Makan Ikan','makan-ikan','<h1>Odio Mollis Turpis Dictumst</h1><p>Ut arcu tempor auctor pellentesque vitae lacinia potenti amet tellus sagittis molestie aliquam est mi facilisi amet...</p>','https://example.com/thumb2.jpg','https://example.com/img2.jpg','An article about eating fish','Meta description for fish article','["food", "fish", "seafood"]','["cooking", "seafood"]',7,150,30,15,true,'2017-05-18 13:50:19','550e8400-e29b-41d4-a716-446655440000','2017-05-18 13:50:19','2017-05-18 13:50:19'),
+('550e8400-e29b-41d4-a716-446655440012','Makan Sayur','makan-sayur','Lorem ipsum dolor sit amet, consectetur adipiscing elit. Morbi id odio tortor. Pellentesque in efficitur velit...','https://example.com/thumb3.jpg','https://example.com/img3.jpg','A healthy article about eating vegetables','Meta description for vegetables article','["food", "vegetables", "healthy"]','["cooking", "healthy", "vegetarian"]',4,80,20,8,true,'2017-05-18 13:50:19','550e8400-e29b-41d4-a716-446655440000','2017-05-18 13:50:19','2017-05-18 13:50:19');
 /*!40000 ALTER TABLE `article` ENABLE KEYS */;
 UNLOCK TABLES;
 
---
--- Dumping data for table `article_category`
---
+-- Insert article-category relationships
 LOCK TABLES `article_category` WRITE;
 /*!40000 ALTER TABLE `article_category` DISABLE KEYS */;
 INSERT INTO `article_category` VALUES 
@@ -136,6 +159,7 @@ INSERT INTO `article_category` VALUES
 /*!40000 ALTER TABLE `article_category` ENABLE KEYS */;
 UNLOCK TABLES;
 
+-- Reset SQL mode and settings
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
@@ -145,4 +169,5 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2024-01-01 12:00:00
+-- Migration completed successfully
+SELECT 'Database migration completed successfully!' as status;

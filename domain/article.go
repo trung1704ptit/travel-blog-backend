@@ -10,18 +10,26 @@ import (
 
 // Article is representing the Article data struct
 type Article struct {
-	ID          uuid.UUID       `json:"id"`
-	Title       string          `json:"title" validate:"required"`
-	Slug        string          `json:"slug" validate:"required,alphanumdash"`
-	Content     string          `json:"content" validate:"required"`
-	Thumbnail   string          `json:"thumbnail" validate:"omitempty,url"`
-	Image       string          `json:"image" validate:"omitempty,url"`
-	Description string          `json:"description"`
-	Keywords    JSONStringSlice `json:"keywords"`
-	Categories  []Category      `json:"categories"`
-	Author      Author          `json:"author"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID                 uuid.UUID       `json:"id"`
+	Title              string          `json:"title" validate:"required"`
+	Slug               string          `json:"slug" validate:"required,alphanumdash"`
+	Content            string          `json:"content" validate:"required"`
+	Thumbnail          string          `json:"thumbnail" validate:"omitempty,url"`
+	Image              string          `json:"image" validate:"omitempty,url"`
+	ShortDescription   string          `json:"short_description"`
+	MetaDescription    string          `json:"meta_description"`
+	Keywords           JSONStringSlice `json:"keywords"`
+	Tags               JSONStringSlice `json:"tags"`
+	Categories         []Category      `json:"categories"`
+	Author             Author          `json:"author"`
+	ReadingTimeMinutes int             `json:"reading_time_minutes"`
+	Views              int             `json:"views"`
+	Likes              int             `json:"likes"`
+	Comments           int             `json:"comments"`
+	Published          bool            `json:"published"`
+	PublishedAt        *time.Time      `json:"published_at,omitempty"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	CreatedAt          time.Time       `json:"created_at"`
 }
 
 type ArticleCategory struct {
@@ -29,6 +37,16 @@ type ArticleCategory struct {
 	ArticleID  uuid.UUID `json:"article_id"`
 	CategoryID uuid.UUID `json:"category_id"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type BreadcrumbItem struct {
+	Name string `json:"name"`
+	Link string `json:"link"`
+}
+
+type ArticleResponse struct {
+	Article
+	Breadcrumb []BreadcrumbItem `json:"breadcrumb"`
 }
 
 // JSONStringSlice is a custom type that handles JSON marshaling/unmarshaling for string slices
