@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/google/uuid"
+
 	"github.com/bxcodec/go-clean-arch/domain"
 )
 
@@ -35,7 +37,7 @@ func (m *AuthorRepository) getOne(ctx context.Context, query string, args ...int
 	return
 }
 
-func (m *AuthorRepository) GetByID(ctx context.Context, id int64) (domain.Author, error) {
+func (m *AuthorRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.Author, error) {
 	query := `SELECT id, name, created_at, updated_at FROM author WHERE id=?`
 	return m.getOne(ctx, query, id)
 }

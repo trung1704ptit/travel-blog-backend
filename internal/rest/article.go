@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 	validator "gopkg.in/go-playground/validator.v9"
@@ -22,11 +23,11 @@ type ResponseError struct {
 //go:generate mockery --name ArticleService
 type ArticleService interface {
 	Fetch(ctx context.Context, cursor string, num int64) ([]domain.Article, string, error)
-	GetByID(ctx context.Context, id int64) (domain.Article, error)
+	GetByID(ctx context.Context, id uuid.UUID) (domain.Article, error)
 	Update(ctx context.Context, ar *domain.Article) error
-	GetByTitle(ctx context.Context, title string) (domain.Article, error)
+	GetBySlug(ctx context.Context, slug string) (domain.Article, error)
 	Store(context.Context, *domain.Article) error
-	Delete(ctx context.Context, id int64) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // ArticleHandler  represent the httphandler for article
@@ -70,12 +71,12 @@ func (a *ArticleHandler) FetchArticle(c echo.Context) error {
 
 // GetByID will get article by given id
 func (a *ArticleHandler) GetByID(c echo.Context) error {
-	idP, err := strconv.Atoi(c.Param("id"))
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, domain.ErrNotFound.Error())
+		return c.JSON(http.StatusBadRequest, ResponseError{Message: "Invalid UUID format"})
 	}
 
-	id := int64(idP)
 	ctx := c.Request().Context()
 
 	art, err := a.Service.GetByID(ctx, id)
@@ -108,6 +109,11 @@ func (a *ArticleHandler) Store(c echo.Context) (err error) {
 		return c.JSON(http.StatusBadRequest, err.Error())
 	}
 
+	// Generate UUID if not provided
+	if article.ID == uuid.Nil {
+		article.ID = uuid.New()
+	}
+
 	ctx := c.Request().Context()
 	err = a.Service.Store(ctx, &article)
 	if err != nil {
@@ -119,12 +125,12 @@ func (a *ArticleHandler) Store(c echo.Context) (err error) {
 
 // Delete will delete article by given param
 func (a *ArticleHandler) Delete(c echo.Context) error {
-	idP, err := strconv.Atoi(c.Param("id"))
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, domain.ErrNotFound.Error())
+		return c.JSON(http.StatusBadRequest, ResponseError{Message: "Invalid UUID format"})
 	}
 
-	id := int64(idP)
 	ctx := c.Request().Context()
 
 	err = a.Service.Delete(ctx, id)

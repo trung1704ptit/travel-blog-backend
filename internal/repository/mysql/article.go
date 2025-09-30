@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
 	"github.com/bxcodec/go-clean-arch/domain"
@@ -37,11 +38,16 @@ func (m *ArticleRepository) fetch(ctx context.Context, query string, args ...int
 	result = make([]domain.Article, 0)
 	for rows.Next() {
 		t := domain.Article{}
-		authorID := int64(0)
+		var authorID uuid.UUID
 		err = rows.Scan(
 			&t.ID,
 			&t.Title,
+			&t.Slug,
 			&t.Content,
+			&t.Thumbnail,
+			&t.Image,
+			&t.Description,
+			&t.Keywords,
 			&authorID,
 			&t.UpdatedAt,
 			&t.CreatedAt,
@@ -61,7 +67,7 @@ func (m *ArticleRepository) fetch(ctx context.Context, query string, args ...int
 }
 
 func (m *ArticleRepository) Fetch(ctx context.Context, cursor string, num int64) (res []domain.Article, nextCursor string, err error) {
-	query := `SELECT id,title,content, author_id, updated_at, created_at
+	query := `SELECT id, title, slug, content, thumbnail, image, description, keywords, author_id, updated_at, created_at
   						FROM article WHERE created_at > ? ORDER BY created_at LIMIT ? `
 
 	decodedCursor, err := repository.DecodeCursor(cursor)
@@ -80,8 +86,8 @@ func (m *ArticleRepository) Fetch(ctx context.Context, cursor string, num int64)
 
 	return
 }
-func (m *ArticleRepository) GetByID(ctx context.Context, id int64) (res domain.Article, err error) {
-	query := `SELECT id,title,content, author_id, updated_at, created_at
+func (m *ArticleRepository) GetByID(ctx context.Context, id uuid.UUID) (res domain.Article, err error) {
+	query := `SELECT id, title, slug, content, thumbnail, image, description, keywords, author_id, updated_at, created_at
   						FROM article WHERE ID = ?`
 
 	list, err := m.fetch(ctx, query, id)
@@ -99,7 +105,7 @@ func (m *ArticleRepository) GetByID(ctx context.Context, id int64) (res domain.A
 }
 
 func (m *ArticleRepository) GetByTitle(ctx context.Context, title string) (res domain.Article, err error) {
-	query := `SELECT id,title,content, author_id, updated_at, created_at
+	query := `SELECT id, title, slug, content, thumbnail, image, description, keywords, author_id, updated_at, created_at
   						FROM article WHERE title = ?`
 
 	list, err := m.fetch(ctx, query, title)
@@ -115,26 +121,43 @@ func (m *ArticleRepository) GetByTitle(ctx context.Context, title string) (res d
 	return
 }
 
+func (m *ArticleRepository) GetBySlug(ctx context.Context, slug string) (res domain.Article, err error) {
+	query := `SELECT id, title, slug, content, thumbnail, image, description, keywords, author_id, updated_at, created_at
+  						FROM article WHERE slug = ?`
+
+	list, err := m.fetch(ctx, query, slug)
+	if err != nil {
+		return
+	}
+
+	if len(list) > 0 {
+		res = list[0]
+	} else {
+		return res, domain.ErrNotFound
+	}
+	return
+}
+
 func (m *ArticleRepository) Store(ctx context.Context, a *domain.Article) (err error) {
-	query := `INSERT  article SET title=? , content=? , author_id=?, updated_at=? , created_at=?`
+	query := `INSERT article SET id=?, title=?, slug=?, content=?, thumbnail=?, image=?, description=?, keywords=?, author_id=?, updated_at=?, created_at=?`
 	stmt, err := m.Conn.PrepareContext(ctx, query)
 	if err != nil {
 		return
 	}
 
-	res, err := stmt.ExecContext(ctx, a.Title, a.Content, a.Author.ID, a.UpdatedAt, a.CreatedAt)
+	// Generate UUID if not set
+	if a.ID == uuid.Nil {
+		a.ID = uuid.New()
+	}
+
+	_, err = stmt.ExecContext(ctx, a.ID, a.Title, a.Slug, a.Content, a.Thumbnail, a.Image, a.Description, a.Keywords, a.Author.ID, a.UpdatedAt, a.CreatedAt)
 	if err != nil {
 		return
 	}
-	lastID, err := res.LastInsertId()
-	if err != nil {
-		return
-	}
-	a.ID = lastID
 	return
 }
 
-func (m *ArticleRepository) Delete(ctx context.Context, id int64) (err error) {
+func (m *ArticleRepository) Delete(ctx context.Context, id uuid.UUID) (err error) {
 	query := "DELETE FROM article WHERE id = ?"
 
 	stmt, err := m.Conn.PrepareContext(ctx, query)
@@ -160,14 +183,14 @@ func (m *ArticleRepository) Delete(ctx context.Context, id int64) (err error) {
 	return
 }
 func (m *ArticleRepository) Update(ctx context.Context, ar *domain.Article) (err error) {
-	query := `UPDATE article set title=?, content=?, author_id=?, updated_at=? WHERE ID = ?`
+	query := `UPDATE article set title=?, slug=?, content=?, thumbnail=?, image=?, description=?, keywords=?, author_id=?, updated_at=? WHERE ID = ?`
 
 	stmt, err := m.Conn.PrepareContext(ctx, query)
 	if err != nil {
 		return
 	}
 
-	res, err := stmt.ExecContext(ctx, ar.Title, ar.Content, ar.Author.ID, ar.UpdatedAt, ar.ID)
+	res, err := stmt.ExecContext(ctx, ar.Title, ar.Slug, ar.Content, ar.Thumbnail, ar.Image, ar.Description, ar.Keywords, ar.Author.ID, ar.UpdatedAt, ar.ID)
 	if err != nil {
 		return
 	}
@@ -181,4 +204,11 @@ func (m *ArticleRepository) Update(ctx context.Context, ar *domain.Article) (err
 	}
 
 	return
+}
+
+func (m *ArticleRepository) SlugExistsExludingID(ctx context.Context, slug string, excludeID uuid.UUID) (bool, error) {
+	query := `SELECT COUNT(*) FROM article WHERE slug = ? AND id != ?`
+	var count int
+	err := m.Conn.QueryRowContext(ctx, query, slug, excludeID).Scan(&count)
+	return count > 0, err
 }
