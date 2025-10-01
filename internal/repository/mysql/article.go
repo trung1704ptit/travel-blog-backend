@@ -9,7 +9,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/bxcodec/go-clean-arch/domain"
-	"github.com/bxcodec/go-clean-arch/internal/repository"
 )
 
 type ArticleRepository struct {
@@ -47,7 +46,15 @@ func (m *ArticleRepository) fetch(ctx context.Context, query string, args ...int
 			&t.Thumbnail,
 			&t.Image,
 			&t.ShortDescription,
+			&t.MetaDescription,
 			&t.Keywords,
+			&t.Tags,
+			&t.ReadingTimeMinutes,
+			&t.Views,
+			&t.Likes,
+			&t.Comments,
+			&t.Published,
+			&t.PublishedAt,
 			&authorID,
 			&t.UpdatedAt,
 			&t.CreatedAt,
@@ -66,28 +73,22 @@ func (m *ArticleRepository) fetch(ctx context.Context, query string, args ...int
 	return result, nil
 }
 
-func (m *ArticleRepository) Fetch(ctx context.Context, cursor string, num int64) (res []domain.Article, nextCursor string, err error) {
-	query := `SELECT id, title, slug, content, thumbnail, image, short_description, keywords, author_id, updated_at, created_at
-  						FROM article WHERE created_at > ? ORDER BY created_at LIMIT ? `
+func (m *ArticleRepository) Fetch(ctx context.Context, page, limit int) (res []domain.Article, err error) {
+	// Calculate offset for pagination
+	offset := (page - 1) * limit
 
-	decodedCursor, err := repository.DecodeCursor(cursor)
-	if err != nil && cursor != "" {
-		return nil, "", domain.ErrBadParamInput
-	}
+	query := `SELECT id, title, slug, content, thumbnail, image, short_description, meta_description, keywords, tags, reading_time_minutes, views, likes, comments, published, published_at, author_id, updated_at, created_at
+  						FROM article ORDER BY created_at DESC LIMIT ? OFFSET ? `
 
-	res, err = m.fetch(ctx, query, decodedCursor, num)
+	res, err = m.fetch(ctx, query, limit, offset)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	if len(res) == int(num) {
-		nextCursor = repository.EncodeCursor(res[len(res)-1].CreatedAt)
-	}
-
-	return
+	return res, nil
 }
 func (m *ArticleRepository) GetByID(ctx context.Context, id uuid.UUID) (res domain.Article, err error) {
-	query := `SELECT id, title, slug, content, thumbnail, image, short_description, keywords, author_id, updated_at, created_at
+	query := `SELECT id, title, slug, content, thumbnail, image, short_description, meta_description, keywords, tags, reading_time_minutes, views, likes, comments, published, published_at, author_id, updated_at, created_at
   						FROM article WHERE ID = ?`
 
 	list, err := m.fetch(ctx, query, id)
@@ -98,14 +99,14 @@ func (m *ArticleRepository) GetByID(ctx context.Context, id uuid.UUID) (res doma
 	if len(list) > 0 {
 		res = list[0]
 	} else {
-		return res, domain.ErrNotFound
+		return res, fmt.Errorf("article with ID '%s' not found", id)
 	}
 
 	return
 }
 
 func (m *ArticleRepository) GetByTitle(ctx context.Context, title string) (res domain.Article, err error) {
-	query := `SELECT id, title, slug, content, thumbnail, image, short_description, keywords, author_id, updated_at, created_at
+	query := `SELECT id, title, slug, content, thumbnail, image, short_description, meta_description, keywords, tags, reading_time_minutes, views, likes, comments, published, published_at, author_id, updated_at, created_at
   						FROM article WHERE title = ?`
 
 	list, err := m.fetch(ctx, query, title)
@@ -116,13 +117,13 @@ func (m *ArticleRepository) GetByTitle(ctx context.Context, title string) (res d
 	if len(list) > 0 {
 		res = list[0]
 	} else {
-		return res, domain.ErrNotFound
+		return res, fmt.Errorf("article with title '%s' not found", title)
 	}
 	return
 }
 
 func (m *ArticleRepository) GetBySlug(ctx context.Context, slug string) (res domain.Article, err error) {
-	query := `SELECT id, title, slug, content, thumbnail, image, short_description, keywords, author_id, updated_at, created_at
+	query := `SELECT id, title, slug, content, thumbnail, image, short_description, meta_description, keywords, tags, reading_time_minutes, views, likes, comments, published, published_at, author_id, updated_at, created_at
   						FROM article WHERE slug = ?`
 
 	list, err := m.fetch(ctx, query, slug)
@@ -133,14 +134,27 @@ func (m *ArticleRepository) GetBySlug(ctx context.Context, slug string) (res dom
 	if len(list) > 0 {
 		res = list[0]
 	} else {
-		return res, domain.ErrNotFound
+		return res, fmt.Errorf("article with slug '%s' not found", slug)
 	}
 	return
 }
 
 func (m *ArticleRepository) Store(ctx context.Context, a *domain.Article) (err error) {
-	query := `INSERT article SET id=?, title=?, slug=?, content=?, thumbnail=?, image=?, short_description=?, keywords=?, author_id=?, updated_at=?, created_at=?`
-	stmt, err := m.Conn.PrepareContext(ctx, query)
+	// Start transaction
+	tx, err := m.Conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
+
+	query := `INSERT article SET id=?, title=?, slug=?, content=?, thumbnail=?, image=?, short_description=?, meta_description=?, keywords=?, tags=?, reading_time_minutes=?, views=?, likes=?, comments=?, published=?, published_at=?, author_id=?, updated_at=?, created_at=?`
+	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
 		return
 	}
@@ -150,10 +164,34 @@ func (m *ArticleRepository) Store(ctx context.Context, a *domain.Article) (err e
 		a.ID = uuid.New()
 	}
 
-	_, err = stmt.ExecContext(ctx, a.ID, a.Title, a.Slug, a.Content, a.Thumbnail, a.Image, a.ShortDescription, a.Keywords, a.Author.ID, a.UpdatedAt, a.CreatedAt)
+	_, err = stmt.ExecContext(ctx, a.ID, a.Title, a.Slug, a.Content, a.Thumbnail, a.Image, a.ShortDescription, a.MetaDescription, a.Keywords, a.Tags, a.ReadingTimeMinutes, a.Views, a.Likes, a.Comments, a.Published, a.PublishedAt, a.Author.ID, a.UpdatedAt, a.CreatedAt)
 	if err != nil {
 		return
 	}
+
+	// Link categories if provided, or assign default category
+	categories := a.Categories
+	if len(categories) == 0 {
+		// Assign default "Uncategorized" category
+		defaultCategoryID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		categories = []domain.Category{{ID: defaultCategoryID}}
+	}
+
+	categoryQuery := `INSERT INTO article_category (id, article_id, category_id, created_at) VALUES (?, ?, ?, ?)`
+	categoryStmt, err := tx.PrepareContext(ctx, categoryQuery)
+	if err != nil {
+		return err
+	}
+	defer categoryStmt.Close()
+
+	for _, category := range categories {
+		categoryLinkID := uuid.New()
+		_, err = categoryStmt.ExecContext(ctx, categoryLinkID, a.ID, category.ID, a.CreatedAt)
+		if err != nil {
+			return err
+		}
+	}
+
 	return
 }
 
@@ -183,14 +221,27 @@ func (m *ArticleRepository) Delete(ctx context.Context, id uuid.UUID) (err error
 	return
 }
 func (m *ArticleRepository) Update(ctx context.Context, ar *domain.Article) (err error) {
-	query := `UPDATE article set title=?, slug=?, content=?, thumbnail=?, image=?, short_description=?, keywords=?, author_id=?, updated_at=? WHERE ID = ?`
+	// Start transaction
+	tx, err := m.Conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+			return
+		}
+		err = tx.Commit()
+	}()
 
-	stmt, err := m.Conn.PrepareContext(ctx, query)
+	query := `UPDATE article set title=?, slug=?, content=?, thumbnail=?, image=?, short_description=?, meta_description=?, keywords=?, tags=?, reading_time_minutes=?, views=?, likes=?, comments=?, published=?, published_at=?, author_id=?, updated_at=? WHERE ID = ?`
+
+	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
 		return
 	}
 
-	res, err := stmt.ExecContext(ctx, ar.Title, ar.Slug, ar.Content, ar.Thumbnail, ar.Image, ar.ShortDescription, ar.Keywords, ar.Author.ID, ar.UpdatedAt, ar.ID)
+	res, err := stmt.ExecContext(ctx, ar.Title, ar.Slug, ar.Content, ar.Thumbnail, ar.Image, ar.ShortDescription, ar.MetaDescription, ar.Keywords, ar.Tags, ar.ReadingTimeMinutes, ar.Views, ar.Likes, ar.Comments, ar.Published, ar.PublishedAt, ar.Author.ID, ar.UpdatedAt, ar.ID)
 	if err != nil {
 		return
 	}
@@ -201,6 +252,39 @@ func (m *ArticleRepository) Update(ctx context.Context, ar *domain.Article) (err
 	if affect != 1 {
 		err = fmt.Errorf("weird  Behavior. Total Affected: %d", affect)
 		return
+	}
+
+	// Update categories if provided
+	if len(ar.Categories) > 0 {
+		// First, lock the rows to prevent deadlock - select existing links
+		lockQuery := `SELECT id FROM article_category WHERE article_id = ? ORDER BY id FOR UPDATE`
+		_, err = tx.ExecContext(ctx, lockQuery, ar.ID)
+		if err != nil {
+			return err
+		}
+
+		// Delete existing category links
+		deleteQuery := `DELETE FROM article_category WHERE article_id = ?`
+		_, err = tx.ExecContext(ctx, deleteQuery, ar.ID)
+		if err != nil {
+			return err
+		}
+
+		// Insert new category links in sorted order to prevent deadlock
+		categoryQuery := `INSERT INTO article_category (id, article_id, category_id, created_at) VALUES (?, ?, ?, ?)`
+		categoryStmt, err := tx.PrepareContext(ctx, categoryQuery)
+		if err != nil {
+			return err
+		}
+		defer categoryStmt.Close()
+
+		for _, category := range ar.Categories {
+			categoryLinkID := uuid.New()
+			_, err = categoryStmt.ExecContext(ctx, categoryLinkID, ar.ID, category.ID, ar.UpdatedAt)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return

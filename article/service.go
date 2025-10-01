@@ -18,7 +18,7 @@ import (
 //
 //go:generate mockery --name ArticleRepository
 type ArticleRepository interface {
-	Fetch(ctx context.Context, cursor string, num int64) (res []domain.Article, nextCursor string, err error)
+	Fetch(ctx context.Context, page, limit int) (res []domain.Article, err error)
 	GetByID(ctx context.Context, id uuid.UUID) (domain.Article, error)
 	GetBySlug(ctx context.Context, title string) (domain.Article, error)
 	Update(ctx context.Context, ar *domain.Article) error
@@ -112,24 +112,23 @@ func (a *Service) fillAuthorDetails(ctx context.Context, data []domain.Article) 
 	return data, nil
 }
 
-func (a *Service) Fetch(ctx context.Context, cursor string, num int64) (res []domain.ArticleResponse, nextCursor string, err error) {
-	articles, nextCursor, err := a.articleRepo.Fetch(ctx, cursor, num)
+func (a *Service) Fetch(ctx context.Context, page, limit int) (res []domain.ArticleResponse, err error) {
+	articles, err := a.articleRepo.Fetch(ctx, page, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	articles, err = a.fillAuthorDetails(ctx, articles)
 	if err != nil {
-		nextCursor = ""
-		return nil, "", err
+		return nil, err
 	}
 
 	// Fill categories and generate breadcrumbs
 	res, err = a.fillCategoriesAndBreadcrumb(ctx, articles)
 	if err != nil {
-		nextCursor = ""
+		return nil, err
 	}
-	return
+	return res, nil
 }
 
 func (a *Service) GetByID(ctx context.Context, id uuid.UUID) (res domain.ArticleResponse, err error) {
@@ -164,8 +163,97 @@ func (a *Service) GetByID(ctx context.Context, id uuid.UUID) (res domain.Article
 }
 
 func (a *Service) Update(ctx context.Context, ar *domain.Article) (err error) {
+	// Validate that the author exists
+	_, err = a.authorRepo.GetByID(ctx, ar.Author.ID)
+	if err != nil {
+		return err
+	}
+
 	ar.UpdatedAt = time.Now()
 	return a.articleRepo.Update(ctx, ar)
+}
+
+// UpdatePartial updates only the provided fields of an article
+func (a *Service) UpdatePartial(ctx context.Context, id uuid.UUID, updates map[string]interface{}) (err error) {
+	// Get existing article
+	existingArticle, err := a.articleRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// Apply partial updates
+	updatedArticle := existingArticle
+	if title, ok := updates["title"].(string); ok {
+		updatedArticle.Title = title
+	}
+	if slug, ok := updates["slug"].(string); ok {
+		updatedArticle.Slug = slug
+	}
+	if content, ok := updates["content"].(string); ok {
+		updatedArticle.Content = content
+	}
+	if thumbnail, ok := updates["thumbnail"].(string); ok {
+		updatedArticle.Thumbnail = thumbnail
+	}
+	if image, ok := updates["image"].(string); ok {
+		updatedArticle.Image = image
+	}
+	if shortDesc, ok := updates["short_description"].(string); ok {
+		updatedArticle.ShortDescription = shortDesc
+	}
+	if metaDesc, ok := updates["meta_description"].(string); ok {
+		updatedArticle.MetaDescription = metaDesc
+	}
+	if readingTime, ok := updates["reading_time_minutes"].(int); ok {
+		updatedArticle.ReadingTimeMinutes = readingTime
+	}
+	if views, ok := updates["views"].(int); ok {
+		updatedArticle.Views = views
+	}
+	if likes, ok := updates["likes"].(int); ok {
+		updatedArticle.Likes = likes
+	}
+	if comments, ok := updates["comments"].(int); ok {
+		updatedArticle.Comments = comments
+	}
+	if published, ok := updates["published"].(bool); ok {
+		updatedArticle.Published = published
+	}
+	if publishedAt, ok := updates["published_at"].(*time.Time); ok {
+		updatedArticle.PublishedAt = publishedAt
+	}
+	if authorID, ok := updates["author_id"].(uuid.UUID); ok {
+		// Validate that the author exists
+		_, err = a.authorRepo.GetByID(ctx, authorID)
+		if err != nil {
+			return err
+		}
+		updatedArticle.Author.ID = authorID
+	}
+
+	// Handle keywords (JSONStringSlice)
+	if keywordsData, ok := updates["keywords"]; ok {
+		if keywords, ok := keywordsData.(domain.JSONStringSlice); ok {
+			updatedArticle.Keywords = keywords
+		}
+	}
+
+	// Handle tags (JSONStringSlice)
+	if tagsData, ok := updates["tags"]; ok {
+		if tags, ok := tagsData.(domain.JSONStringSlice); ok {
+			updatedArticle.Tags = tags
+		}
+	}
+
+	// Handle categories
+	if categoriesData, ok := updates["categories"]; ok {
+		if categories, ok := categoriesData.([]domain.Category); ok {
+			updatedArticle.Categories = categories
+		}
+	}
+
+	updatedArticle.UpdatedAt = time.Now()
+	return a.articleRepo.Update(ctx, &updatedArticle)
 }
 
 func (a *Service) GetBySlug(ctx context.Context, slug string) (res domain.ArticleResponse, err error) {
@@ -206,6 +294,12 @@ func (a *Service) Store(ctx context.Context, m *domain.Article) (err error) {
 		return domain.ErrConflict
 	}
 
+	// Validate that the author exists
+	_, err = a.authorRepo.GetByID(ctx, m.Author.ID)
+	if err != nil {
+		return err
+	}
+
 	if m.Slug == "" {
 		m.Slug = generateSlug(m.Title)
 	}
@@ -224,7 +318,7 @@ func (a *Service) Store(ctx context.Context, m *domain.Article) (err error) {
 func (a *Service) Delete(ctx context.Context, id uuid.UUID) (err error) {
 	existedArticle, err := a.articleRepo.GetByID(ctx, id)
 	if err != nil {
-		return
+		return err
 	}
 	if existedArticle.ID == uuid.Nil {
 		return domain.ErrNotFound

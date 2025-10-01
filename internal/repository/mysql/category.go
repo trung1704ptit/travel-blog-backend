@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,13 +47,13 @@ func (m *CategoryRepository) GetByArticleID(ctx context.Context, articleID uuid.
 	var categories []domain.Category
 	for rows.Next() {
 		category := domain.Category{}
-		var parentID sql.NullString
+		var parentID, image sql.NullString
 		err = rows.Scan(
 			&category.ID,
 			&category.Name,
 			&category.Slug,
 			&category.Description,
-			&category.Image,
+			&image,
 			&parentID,
 			&category.CreatedAt,
 			&category.UpdatedAt,
@@ -61,6 +62,11 @@ func (m *CategoryRepository) GetByArticleID(ctx context.Context, articleID uuid.
 		if err != nil {
 			logrus.Error(err)
 			return nil, err
+		}
+
+		// Handle image
+		if image.Valid {
+			category.Image = image.String
 		}
 
 		// Handle parent_id
@@ -114,13 +120,13 @@ func (m *CategoryRepository) GetByIDs(ctx context.Context, categoryIDs []uuid.UU
 	var categories []domain.Category
 	for rows.Next() {
 		category := domain.Category{}
-		var parentID sql.NullString
+		var parentID, image sql.NullString
 		err = rows.Scan(
 			&category.ID,
 			&category.Name,
 			&category.Slug,
 			&category.Description,
-			&category.Image,
+			&image,
 			&parentID,
 			&category.CreatedAt,
 			&category.UpdatedAt,
@@ -129,6 +135,11 @@ func (m *CategoryRepository) GetByIDs(ctx context.Context, categoryIDs []uuid.UU
 		if err != nil {
 			logrus.Error(err)
 			return nil, err
+		}
+
+		// Handle image
+		if image.Valid {
+			category.Image = image.String
 		}
 
 		// Handle parent_id
@@ -146,28 +157,19 @@ func (m *CategoryRepository) GetByIDs(ctx context.Context, categoryIDs []uuid.UU
 }
 
 // Fetch retrieves categories with pagination
-func (m *CategoryRepository) Fetch(ctx context.Context, cursor string, num int64) ([]domain.Category, string, error) {
+func (m *CategoryRepository) Fetch(ctx context.Context, page, limit int) ([]domain.Category, error) {
+	// Calculate offset for pagination
+	offset := (page - 1) * limit
+
 	query := `SELECT id, name, slug, description, image, parent_id, created_at, updated_at
 			  FROM category 
-			  WHERE created_at > ? 
 			  ORDER BY created_at DESC
-			  LIMIT ?`
+			  LIMIT ? OFFSET ?`
 
-	// For simplicity, using created_at as cursor
-	// In production, you might want to use a proper cursor implementation
-	var decodedCursor time.Time
-	if cursor != "" {
-		// Decode cursor (simplified implementation)
-		// You might want to use the same cursor logic as articles
-		decodedCursor = time.Now().Add(-24 * time.Hour) // Default to 24 hours ago
-	} else {
-		decodedCursor = time.Time{} // Beginning of time
-	}
-
-	rows, err := m.Conn.QueryContext(ctx, query, decodedCursor, num)
+	rows, err := m.Conn.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		logrus.Error(err)
-		return nil, "", err
+		return nil, err
 	}
 
 	defer func() {
@@ -181,12 +183,13 @@ func (m *CategoryRepository) Fetch(ctx context.Context, cursor string, num int64
 	for rows.Next() {
 		category := domain.Category{}
 		var parentID sql.NullString
+		var image sql.NullString
 		err = rows.Scan(
 			&category.ID,
 			&category.Name,
 			&category.Slug,
 			&category.Description,
-			&category.Image,
+			&image,
 			&parentID,
 			&category.CreatedAt,
 			&category.UpdatedAt,
@@ -194,7 +197,12 @@ func (m *CategoryRepository) Fetch(ctx context.Context, cursor string, num int64
 
 		if err != nil {
 			logrus.Error(err)
-			return nil, "", err
+			return nil, err
+		}
+
+		// Handle image
+		if image.Valid {
+			category.Image = image.String
 		}
 
 		// Handle parent_id
@@ -208,14 +216,7 @@ func (m *CategoryRepository) Fetch(ctx context.Context, cursor string, num int64
 		categories = append(categories, category)
 	}
 
-	// Generate next cursor
-	var nextCursor string
-	if len(categories) == int(num) {
-		// Use the last category's created_at as next cursor
-		nextCursor = categories[len(categories)-1].CreatedAt.Format(time.RFC3339)
-	}
-
-	return categories, nextCursor, nil
+	return categories, nil
 }
 
 // GetBySlug retrieves a category by its slug
@@ -240,7 +241,7 @@ func (m *CategoryRepository) GetBySlug(ctx context.Context, slug string) (domain
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return domain.Category{}, domain.ErrNotFound
+			return domain.Category{}, fmt.Errorf("category with slug '%s' not found", slug)
 		}
 		logrus.Error(err)
 		return domain.Category{}, err
@@ -266,13 +267,13 @@ func (m *CategoryRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.
 	row := m.Conn.QueryRowContext(ctx, query, id)
 
 	category := domain.Category{}
-	var parentID sql.NullString
+	var parentID, image sql.NullString
 	err := row.Scan(
 		&category.ID,
 		&category.Name,
 		&category.Slug,
 		&category.Description,
-		&category.Image,
+		&image,
 		&parentID,
 		&category.CreatedAt,
 		&category.UpdatedAt,
@@ -280,10 +281,15 @@ func (m *CategoryRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return domain.Category{}, domain.ErrNotFound
+			return domain.Category{}, fmt.Errorf("category with ID '%s' not found", id)
 		}
 		logrus.Error(err)
 		return domain.Category{}, err
+	}
+
+	// Handle image
+	if image.Valid {
+		category.Image = image.String
 	}
 
 	// Handle parent_id
@@ -359,7 +365,7 @@ func (m *CategoryRepository) Update(ctx context.Context, category *domain.Catego
 	}
 
 	if rowsAffected == 0 {
-		return domain.ErrNotFound
+		return fmt.Errorf("category with ID '%s' not found or no changes made", category.ID)
 	}
 
 	return nil
@@ -381,7 +387,7 @@ func (m *CategoryRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if rowsAffected == 0 {
-		return domain.ErrNotFound
+		return fmt.Errorf("category with ID '%s' not found", id)
 	}
 
 	return nil
@@ -418,13 +424,13 @@ func (m *CategoryRepository) GetChildren(ctx context.Context, parentID uuid.UUID
 	var categories []domain.Category
 	for rows.Next() {
 		category := domain.Category{}
-		var parentID sql.NullString
+		var parentID, image sql.NullString
 		err = rows.Scan(
 			&category.ID,
 			&category.Name,
 			&category.Slug,
 			&category.Description,
-			&category.Image,
+			&image,
 			&parentID,
 			&category.CreatedAt,
 			&category.UpdatedAt,
@@ -433,6 +439,11 @@ func (m *CategoryRepository) GetChildren(ctx context.Context, parentID uuid.UUID
 		if err != nil {
 			logrus.Error(err)
 			return nil, err
+		}
+
+		// Handle image
+		if image.Valid {
+			category.Image = image.String
 		}
 
 		// Handle parent_id
@@ -472,13 +483,13 @@ func (m *CategoryRepository) GetRootCategories(ctx context.Context) ([]domain.Ca
 	var categories []domain.Category
 	for rows.Next() {
 		category := domain.Category{}
-		var parentID sql.NullString
+		var parentID, image sql.NullString
 		err = rows.Scan(
 			&category.ID,
 			&category.Name,
 			&category.Slug,
 			&category.Description,
-			&category.Image,
+			&image,
 			&parentID,
 			&category.CreatedAt,
 			&category.UpdatedAt,
@@ -487,6 +498,11 @@ func (m *CategoryRepository) GetRootCategories(ctx context.Context) ([]domain.Ca
 		if err != nil {
 			logrus.Error(err)
 			return nil, err
+		}
+
+		// Handle image
+		if image.Valid {
+			category.Image = image.String
 		}
 
 		// Handle parent_id
@@ -526,13 +542,13 @@ func (m *CategoryRepository) GetCategoryTree(ctx context.Context) ([]domain.Cate
 	var allCategories []domain.Category
 	for rows.Next() {
 		category := domain.Category{}
-		var parentID sql.NullString
+		var parentID, image sql.NullString
 		err = rows.Scan(
 			&category.ID,
 			&category.Name,
 			&category.Slug,
 			&category.Description,
-			&category.Image,
+			&image,
 			&parentID,
 			&category.CreatedAt,
 			&category.UpdatedAt,
@@ -541,6 +557,11 @@ func (m *CategoryRepository) GetCategoryTree(ctx context.Context) ([]domain.Cate
 		if err != nil {
 			logrus.Error(err)
 			return nil, err
+		}
+
+		// Handle image
+		if image.Valid {
+			category.Image = image.String
 		}
 
 		// Handle parent_id

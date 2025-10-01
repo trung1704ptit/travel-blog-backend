@@ -12,7 +12,7 @@ import (
 )
 
 type CategoryService interface {
-	Fetch(ctx context.Context, cursor string, num int64) ([]domain.Category, string, error)
+	Fetch(ctx context.Context, page, limit int) ([]domain.Category, error)
 	GetBySlug(ctx context.Context, slug string) (domain.Category, error)
 	GetByID(ctx context.Context, id uuid.UUID) (domain.Category, error)
 	Update(ctx context.Context, cat *domain.Category) error
@@ -28,7 +28,8 @@ type CategoryHandler struct {
 	Category CategoryService
 }
 
-const defaultCategoryNum = 10
+const defaultCategoryLimit = 100
+const defaultCategoryPage = 1
 
 func NewCategoryHandler(e *echo.Echo, svc CategoryService) {
 	handler := &CategoryHandler{
@@ -39,7 +40,7 @@ func NewCategoryHandler(e *echo.Echo, svc CategoryService) {
 	e.GET("/categories/tree", handler.GetCategoryTree)
 	e.GET("/categories/roots", handler.GetRootCategories)
 	e.POST("/categories", handler.Store)
-	e.PUT("/categories/:id", handler.Update)
+	e.PATCH("/categories/:id", handler.Update)
 	e.GET("/categories/:slug", handler.GetBySlug)
 	e.GET("/categories/:id", handler.GetByID)
 	e.GET("/categories/:slug/children", handler.GetChildren)
@@ -47,21 +48,27 @@ func NewCategoryHandler(e *echo.Echo, svc CategoryService) {
 }
 
 func (cat *CategoryHandler) FetchCategory(c echo.Context) error {
-	numS := c.QueryParam("num")
-	num, err := strconv.Atoi(numS)
-	if err != nil || num == 0 {
-		num = defaultCategoryNum
+	// Parse page parameter
+	pageS := c.QueryParam("page")
+	page, err := strconv.Atoi(pageS)
+	if err != nil || page < 1 {
+		page = defaultCategoryPage
 	}
 
-	cursor := c.QueryParam("cursor")
+	// Parse limit parameter
+	limitS := c.QueryParam("limit")
+	limit, err := strconv.Atoi(limitS)
+	if err != nil || limit < 1 {
+		limit = defaultCategoryLimit
+	}
+
 	ctx := c.Request().Context()
 
-	listCat, nextCursor, err := cat.Category.Fetch(ctx, cursor, int64(num))
+	listCat, err := cat.Category.Fetch(ctx, page, limit)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
-	c.Response().Header().Set(`X-Cursor`, nextCursor)
 	return c.JSON(http.StatusOK, listCat)
 }
 
@@ -77,7 +84,7 @@ func (cat *CategoryHandler) GetBySlug(c echo.Context) error {
 
 	category, err := cat.Category.GetCategoryWithChildren(ctx, slug)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.JSON(http.StatusOK, category)
@@ -96,7 +103,7 @@ func (cat *CategoryHandler) GetByID(c echo.Context) error {
 
 	category, err := cat.Category.GetByID(ctx, id)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.JSON(http.StatusOK, category)
@@ -132,37 +139,66 @@ func (cat *CategoryHandler) Store(c echo.Context) (err error) {
 	ctx := c.Request().Context()
 	err = cat.Category.Store(ctx, &category)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.JSON(http.StatusCreated, category)
 }
 
-// Update will update the category by given request body
+// Update will update the category by given request body (PATCH - partial update)
 func (cat *CategoryHandler) Update(c echo.Context) (err error) {
-	var category domain.Category
 	idStr := c.Param("id")
-	category.ID, err = uuid.Parse(idStr)
+	categoryID, err := uuid.Parse(idStr)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ResponseError{Message: "Invalid UUID format"})
 	}
-	err = c.Bind(&category)
+
+	// Get existing category
+	ctx := c.Request().Context()
+	existingCategory, err := cat.Category.GetByID(ctx, categoryID)
+	if err != nil {
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
+	}
+
+	// Parse partial update data
+	updateData := make(map[string]interface{})
+	err = c.Bind(&updateData)
 	if err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, err.Error())
 	}
 
+	// Apply partial updates to existing category
+	updatedCategory := existingCategory
+	if name, ok := updateData["name"].(string); ok {
+		updatedCategory.Name = name
+	}
+	if slug, ok := updateData["slug"].(string); ok {
+		updatedCategory.Slug = slug
+	}
+	if description, ok := updateData["description"].(string); ok {
+		updatedCategory.Description = description
+	}
+	if image, ok := updateData["image"].(string); ok {
+		updatedCategory.Image = image
+	}
+	if parentID, ok := updateData["parent_id"].(string); ok {
+		if parsedParentID, err := uuid.Parse(parentID); err == nil {
+			updatedCategory.ParentID = &parsedParentID
+		}
+	}
+
+	// Validate updated category
 	var ok bool
-	if ok, err = isCategoryRequestValid(&category); !ok {
+	if ok, err = isCategoryRequestValid(&updatedCategory); !ok {
 		return c.JSON(http.StatusBadRequest, err.Error())
 	}
 
-	ctx := c.Request().Context()
-	err = cat.Category.Update(ctx, &category)
+	err = cat.Category.Update(ctx, &updatedCategory)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
-	return c.JSON(http.StatusOK, category)
+	return c.JSON(http.StatusOK, updatedCategory)
 }
 
 // Delete will delete category by given slug
@@ -178,13 +214,13 @@ func (cat *CategoryHandler) Delete(c echo.Context) error {
 	// First get the category to get its ID
 	category, err := cat.Category.GetByID(ctx, id)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	// Then delete by ID
 	err = cat.Category.Delete(ctx, category.ID)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -196,7 +232,7 @@ func (cat *CategoryHandler) GetCategoryTree(c echo.Context) error {
 
 	categories, err := cat.Category.GetCategoryTree(ctx)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.JSON(http.StatusOK, categories)
@@ -208,7 +244,7 @@ func (cat *CategoryHandler) GetRootCategories(c echo.Context) error {
 
 	categories, err := cat.Category.GetRootCategories(ctx)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.JSON(http.StatusOK, categories)
@@ -227,13 +263,13 @@ func (cat *CategoryHandler) GetChildren(c echo.Context) error {
 	// First get the category to get its ID
 	category, err := cat.Category.GetBySlug(ctx, slug)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	// Then get its children
 	children, err := cat.Category.GetChildren(ctx, category.ID)
 	if err != nil {
-		return c.JSON(getStatusCode(err), ResponseError{Message: err.Error()})
+		return c.JSON(getStatusCode(err), getErrorResponse(err))
 	}
 
 	return c.JSON(http.StatusOK, children)

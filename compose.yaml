@@ -16,7 +16,7 @@ services:
     container_name: go_clean_arch_mysql
     command: mysqld --user=root
     volumes:
-      - ./article.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./initdb.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - 3306:3306
     environment:

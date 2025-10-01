@@ -16,7 +16,7 @@ import (
 //
 //go:generate mockery --name CategoryRepository
 type CategoryRepository interface {
-	Fetch(ctx context.Context, cursor string, num int64) ([]domain.Category, string, error)
+	Fetch(ctx context.Context, page, limit int) ([]domain.Category, error)
 	GetBySlug(ctx context.Context, slug string) (domain.Category, error)
 	GetByID(ctx context.Context, id uuid.UUID) (domain.Category, error)
 	Update(ctx context.Context, category *domain.Category) error
@@ -41,12 +41,12 @@ func NewService(cr CategoryRepository) *Service {
 	}
 }
 
-func (c *Service) Fetch(ctx context.Context, cursor string, num int64) (res []domain.Category, nextCursor string, err error) {
-	res, nextCursor, err = c.categoryRepo.Fetch(ctx, cursor, num)
+func (c *Service) Fetch(ctx context.Context, page, limit int) (res []domain.Category, err error) {
+	res, err = c.categoryRepo.Fetch(ctx, page, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return
+	return res, nil
 }
 
 func (c *Service) GetBySlug(ctx context.Context, slug string) (res domain.Category, err error) {

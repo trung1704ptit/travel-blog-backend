@@ -12,7 +12,7 @@ import (
 type Article struct {
 	ID                 uuid.UUID       `json:"id"`
 	Title              string          `json:"title" validate:"required"`
-	Slug               string          `json:"slug" validate:"required,alphanumdash"`
+	Slug               string          `json:"slug" validate:"required"`
 	Content            string          `json:"content" validate:"required"`
 	Thumbnail          string          `json:"thumbnail" validate:"omitempty,url"`
 	Image              string          `json:"image" validate:"omitempty,url"`
